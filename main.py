@@ -11,17 +11,12 @@ from sklearn.metrics import ConfusionMatrixDisplay, RocCurveDisplay
 from sklearn import preprocessing
 from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
-from sklearn.model_selection import train_test_split
-from sklearn.model_selection import cross_val_score
-from sklearn.model_selection import ShuffleSplit
-from sklearn.model_selection import GridSearchCV
-from sklearn.model_selection import RandomizedSearchCV
-from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import train_test_split, cross_val_score
+from sklearn.model_selection import ShuffleSplit, GridSearchCV, RandomizedSearchCV
+from sklearn.linear_model import LogisticRegression, LinearRegression, Lasso
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.neural_network import MLPClassifier
-from sklearn.metrics import silhouette_score
-from sklearn.metrics import roc_auc_score
-from sklearn.metrics import r2_score
+from sklearn.neural_network import MLPClassifier, MLPRegressor
+from sklearn.metrics import silhouette_score, roc_auc_score, r2_score
 from sklearn.metrics import classification_report, accuracy_score
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 from sklearn.neighbors import LocalOutlierFactor
@@ -30,14 +25,15 @@ from sklearn.inspection import permutation_importance
 from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import StandardScaler, OneHotEncoder
 import xgboost as xgb
-from xgboost import XGBClassifier
+from xgboost import XGBClassifier, XGBRegressor
 from matplotlib import pyplot as plt
+import torch
 
 parser = argparse.ArgumentParser(description='ML Radiomics Prognosis')
 parser.add_argument('-dataset_idx', '--dataset_idx', type=str, default='Zhao301', help='Which dataset to use')
 parser.add_argument('-radioms', '--isRadiomsUsed', type=bool, default=False, help='Whether to use radiomics or not')
 parser.add_argument('-pca', '--isPCAUsed', type=bool, default=False, help='Whether to use PCA to decrease dimension')
-parser.add_argument('-tgt', '--tgt', type=str, default='PFS', help='Which metric to prognosis')
+parser.add_argument('-tgt', '--tgt', type=str, default='PFS-endpoint', help='Which metric to prognosis')
 parser.add_argument('-output', '--out_dir', type=str, default=None, help='Where to output')
 args, _ = parser.parse_known_args()
 
@@ -157,12 +153,14 @@ if args.isPCAUsed:
     pca_feat.columns = [f'pca_{str(i)}' for i in range(pca_feat.shape[1])]
     X = pd.concat([X, pca_feat], axis=1)
 
-if args.tgt == 'PFS':
+if args.tgt == 'PFS-endpoint':
     X_train, X_test, y_train, y_test = train_test_split(X, y_pfs_end, test_size=0.2, random_state=7)
-elif args.tgt == 'OS':
+elif args.tgt == 'OS-endpoint':
     X_train, X_test, y_train, y_test = train_test_split(X, y_os_end, test_size=0.2, random_state=7)
-# X_train, X_test, y_train, y_test = train_test_split(X, y_pfs, test_size=0.2, random_state=7)
-# X_train, X_test, y_train, y_test = train_test_split(X, y_os, test_size=0.2, random_state=7)
+elif args.tgt == 'PFS':
+    X_train, X_test, y_train, y_test = train_test_split(X, y_pfs, test_size=0.2, random_state=7)
+elif args.tgt == 'OS':
+    X_train, X_test, y_train, y_test = train_test_split(X, y_os, test_size=0.2, random_state=7)
 scaler = StandardScaler()
 ct = ColumnTransformer([
     ('scaler', scaler, scale_names),
@@ -172,84 +170,148 @@ ct = ColumnTransformer([
 X_train = ct.fit_transform(X_train)
 X_test = ct.transform(X_test)
 
-# Logistic Regression
+isClass = False
+isRegre = False
+if 'endpoint' in args.tgt:
+    isClass = True 
+else:
+    isRegre = True
 
-# param_grid = {
-#     'C': [0.001, 0.01, 0.1, 1, 10, 100],
-#     'penalty': ['l1', 'l2', 'elasticnet'],
-#     'solver': ['liblinear', 'newton-cg', 'lbfgs', 'sag', 'saga'],
-#     'max_iter': [100, 500, 1000]
-# }
-# model = LogisticRegression()
-# grid = GridSearchCV(model, param_grid, cv=5, scoring='roc_auc', n_jobs=-1)
-# grid.fit(X_train, y_train.values.ravel())
-# print("Best Parameters for Logistic:", grid.best_params_)
-# print("Best ROC_AUC Score for Logistic:", grid.best_score_)
+if isClass:
+    # Logistic Regression
 
-model = LogisticRegression(C=1, max_iter=100, penalty='l1', class_weight='balanced', solver='liblinear')
-model.fit(X_train, y_train.values.ravel())
-y_pred = model.predict(X_test)
-y_prob = model.predict_proba(X_test)[:, 1]
-visualize_result(y_pred, y_test, y_prob, 'Logistic Regression')
+    # param_grid = {
+    #     'C': [0.001, 0.01, 0.1, 1, 10, 100],
+    #     'penalty': ['l1', 'l2', 'elasticnet'],
+    #     'solver': ['liblinear', 'newton-cg', 'lbfgs', 'sag', 'saga'],
+    #     'max_iter': [100, 500, 1000]
+    # }
+    # model = LogisticRegression()
+    # grid = GridSearchCV(model, param_grid, cv=5, scoring='roc_auc', n_jobs=-1)
+    # grid.fit(X_train, y_train.values.ravel())
+    # print("Best Parameters for Logistic:", grid.best_params_)
+    # print("Best ROC_AUC Score for Logistic:", grid.best_score_)
 
-# Random Forest
+    model = LogisticRegression(C=1, max_iter=100, penalty='l1', class_weight='balanced', solver='liblinear')
+    model.fit(X_train, y_train.values.ravel())
+    y_pred = model.predict(X_test)
+    y_prob = model.predict_proba(X_test)[:, 1]
+    visualize_result(y_pred, y_test, y_prob, 'Logistic Regression')
 
-# param_grid = {
-#     'n_estimators': [40, 80, 160, 320, 640, 1280],
-#     'min_samples_split': [8, 10, 12, 24],
-#     'max_depth': [2, 4, 8]
-# }
-# model = RandomForestClassifier()
-# grid = GridSearchCV(model, param_grid, cv=5, scoring='roc_auc', n_jobs=-1)
-# grid.fit(X_train, y_train.values.ravel())
-# print("Best Parameters for Random Forest:", grid.best_params_)
-# print("Best ROC_AUC Score for Random Forest:", grid.best_score_)
+    # Random Forest
 
-model = RandomForestClassifier(n_estimators=80, min_samples_split=24, max_depth=8)
-model.fit(X_train, y_train.values.ravel())
-y_pred = model.predict(X_test)
-y_prob = model.predict_proba(X_test)[:, 1]
-visualize_result(y_pred, y_test, y_prob, 'Random Forest')
+    # param_grid = {
+    #     'n_estimators': [40, 80, 160, 320, 640, 1280],
+    #     'min_samples_split': [8, 10, 12, 24],
+    #     'max_depth': [2, 4, 8]
+    # }
+    # model = RandomForestClassifier()
+    # grid = GridSearchCV(model, param_grid, cv=5, scoring='roc_auc', n_jobs=-1)
+    # grid.fit(X_train, y_train.values.ravel())
+    # print("Best Parameters for Random Forest:", grid.best_params_)
+    # print("Best ROC_AUC Score for Random Forest:", grid.best_score_)
+
+    model = RandomForestClassifier(n_estimators=80, min_samples_split=24, max_depth=8)
+    model.fit(X_train, y_train.values.ravel())
+    y_pred = model.predict(X_test)
+    y_prob = model.predict_proba(X_test)[:, 1]
+    visualize_result(y_pred, y_test, y_prob, 'Random Forest')
 
 
-# xgboost
+    # xgboost
 
-# param_grid = {
-#     'tree_method': ['exact'],
-#     'n_estimators': [20, 40, 80, 100, 500, 1000],
-#     'max_depth': range(3,10,2),
-#     'min_child_weight': range(1,6,2),
-#     'gamma': [i/10.0 for i in range(0,5)],
-#     'subsample': [0.73, 0.8, 0.85, 0.9, 0.95],
-#     'reg_alpha': [1e-2, 0.1, 1, 10],
-#     'learning_rate': [0.0005, 0.001, 0.01, 0.05],
-#     'scale_pos_weight': [1, 5, 8, 10, 50],
-# }
-# model = XGBClassifier()
-# grid = GridSearchCV(model, param_grid, cv=5, scoring='roc_auc', n_jobs=-1)
-# grid.fit(X_train, y_train.values.ravel())
-# print("Best Parameters for xgboost:", grid.best_params_)
-# print("Best ROC_AUC Score for xgboost:", grid.best_score_)
+    # param_grid = {
+    #     'tree_method': ['exact'],
+    #     'n_estimators': [20, 40, 80, 100, 500, 1000],
+    #     'max_depth': range(3,10,2),
+    #     'min_child_weight': range(1,6,2),
+    #     'gamma': [i/10.0 for i in range(0,5)],
+    #     'subsample': [0.73, 0.8, 0.85, 0.9, 0.95],
+    #     'reg_alpha': [1e-2, 0.1, 1, 10],
+    #     'learning_rate': [0.0005, 0.001, 0.01, 0.05],
+    #     'scale_pos_weight': [1, 5, 8, 10, 50],
+    # }
+    # model = XGBClassifier()
+    # grid = GridSearchCV(model, param_grid, cv=5, scoring='roc_auc', n_jobs=-1)
+    # grid.fit(X_train, y_train.values.ravel())
+    # print("Best Parameters for xgboost:", grid.best_params_)
+    # print("Best ROC_AUC Score for xgboost:", grid.best_score_)
 
-model = XGBClassifier(
-    learning_rate=0.05,
-    n_estimators=40,         # 树的个数--1000棵树建立xgboost
-    max_depth=15,               # 树的深度
-    min_child_weight = 10,      # 叶子节点最小权重
-    gamma=0.4,                # 惩罚项中叶子结点个数前的参数
-    # gamma=1.2,                  # 惩罚项中叶子结点个数前的参数
-    subsample=0.8,             # 随机选择80%样本建立决策树
-    colsample_btree=0.8,       # 随机选择80%特征建立决策树
-    # objective='multi:softmax', # 指定损失函数
-    # scale_pos_weight=4,        # 解决样本个数不平衡的问题
-    # scale_pos_weight=3,        # 解决样本个数不平衡的问题
-    scale_pos_weight=5,        # 解决样本个数不平衡的问题
-    random_state=27,           # 随机数
-    # num_class=2,
-    reg_alpha=10,
-    reg_lambda=15,
-)
-model.fit(X_train, y_train.values.ravel())
-y_pred = model.predict(X_test)
-y_prob = model.predict_proba(X_test)[:, 1]
-visualize_result(y_pred, y_test, y_prob, 'xgboost')
+    model = XGBClassifier(
+        learning_rate=0.05,
+        n_estimators=40,         # 树的个数--1000棵树建立xgboost
+        max_depth=15,               # 树的深度
+        min_child_weight = 10,      # 叶子节点最小权重
+        gamma=0.4,                # 惩罚项中叶子结点个数前的参数
+        # gamma=1.2,                  # 惩罚项中叶子结点个数前的参数
+        subsample=0.8,             # 随机选择80%样本建立决策树
+        colsample_btree=0.8,       # 随机选择80%特征建立决策树
+        # objective='multi:softmax', # 指定损失函数
+        # scale_pos_weight=4,        # 解决样本个数不平衡的问题
+        # scale_pos_weight=3,        # 解决样本个数不平衡的问题
+        scale_pos_weight=5,        # 解决样本个数不平衡的问题
+        random_state=27,           # 随机数
+        # num_class=2,
+        reg_alpha=10,
+        reg_lambda=15,
+    )
+    model.fit(X_train, y_train.values.ravel())
+    y_pred = model.predict(X_test)
+    y_prob = model.predict_proba(X_test)[:, 1]
+    visualize_result(y_pred, y_test, y_prob, 'xgboost')
+
+elif isRegre:
+    model = LinearRegression()
+    model.fit(X_train, y_train)
+    y_pred = model.predict(X_test)
+    diff = (y_pred - y_test)**2
+    rmse = np.sqrt(np.mean(diff))
+    cc = np.corrcoef(y_pred, y_test)
+    print(f"Linear RMSE: {rmse}")
+    print(f"Linear CC: {cc}")
+    # visualize_result()
+
+    model = Lasso(alpha=0.4)
+    model.fit(X_train, y_train)
+    y_pred = model.predict(X_test)
+    diff = (y_pred - y_test)**2
+    rmse = np.sqrt(np.mean(diff))
+    cc = np.corrcoef(y_pred, y_test)
+    print(f"Lasso RMSE: {rmse}")
+    print(f"Lasso CC: {cc}")
+
+    model = MLPRegressor(hidden_layer_sizes=(32, 64,), 
+            max_iter=1000, activation='relu', 
+            solver='adam', random_state=7)
+    model.fit(X_train, y_train)
+    y_pred = model.predict(X_test)
+    diff = (y_pred - y_test)**2
+    rmse = np.sqrt(np.mean(diff))
+    cc = np.corrcoef(y_pred, y_test)
+    print(f"MLP RMSE: {rmse}")
+    print(f"MLP CC: {cc}")
+
+
+    model = XGBRegressor(
+        learning_rate=0.05,
+        booster='gbtree',
+        eta=0.03,
+        max_depth=3,               # 树的深度
+        gamma=0.5,                # 惩罚项中叶子结点个数前的参数
+        # gamma=1.2,                  # 惩罚项中叶子结点个数前的参数
+        subsample=0.8,             # 随机选择80%样本建立决策树
+        colsample_btree=0.8,       # 随机选择80%特征建立决策树
+        objective='survival:cox', # 指定损失函数
+        eval_metric='cox-nloglik',
+        # scale_pos_weight=4,        # 解决样本个数不平衡的问题
+        # scale_pos_weight=3,        # 解决样本个数不平衡的问题
+        scale_pos_weight=5,        # 解决样本个数不平衡的问题
+        random_state=7,           # 随机数
+    )
+    model.fit(X_train, y_train)
+    y_pred = model.predict(X_test)
+    diff = (y_pred - y_test)**2
+    rmse = np.sqrt(np.mean(diff))
+    cc = np.corrcoef(y_pred, y_test)
+    print(f"XGB RMSE: {rmse}")
+    print(f"XGB CC: {cc}")
